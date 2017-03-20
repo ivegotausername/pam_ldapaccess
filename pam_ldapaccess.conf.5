@@ -1,0 +1,55 @@
+.TH "PAM_LDAPACCESS.CONF" "5" "2016\-12\-21" "" ""
+
+.SH NAME
+
+pam_ldapaccess.conf - configuration file for the pam_ldapaccess module
+
+.SH DESCRIPTION
+
+The pam_ldapaccess PAM module provides login access control based on IP addresses/IP address ranges/domains/host names specified by a named attribute in your OpenLDAP directory. IP ranges can be specified in either CIDR or netmask format. Configuration options are placed in the /etc/security/pam_ldapaccess.conf file. 
+
+.SH OPTIONS
+\fBSYSTEMNAME\fR
+.RS 4
+The name of your service, hostname, etc. This is used in the failed login attempt messages that are displayed/sent to the user (Default - system).
+.RE
+.PP
+\fBADMINMAIL\fR
+.RS 4
+The admin email account. An email is sent to this account for every failed login attempt, providing user id and hostname information (Default - root).
+.RE
+.PP
+\fBLDAPIPATTR\fR
+.RS 4
+The name of the OpenLDAP attribute that stores the IP addresses/domains/host names that this user can login from. There should be only one value stored in this attribute but the module will read all the attributes of this type that are stored for the user in question. The value stored in the attribute can be a host name, an IP address, a domain name, or an IP range specified in either CIDR or netmask format.
+.RE
+.PP
+\fBLOCALDOMAIN\fR
+.RS 4
+The name of the local domain. Any user with an LDAP mail attribute in this domain will receive the internal users failed login message specified in \fBintmessage (see pam_ldapaccess(8))\fR.
+.RE
+.PP
+\fBINTERNALRANGE\fR
+.RS 4
+A range or list of space separated IP ranges, specified in either CIDR or netmask format, that are exempt from pam_ldapaccess control. Anyone logging in from these ranges will not be subject to any checks against their LDAPIPATTR stored values.
+
+.SH EXAMPLES
+
+SYSTEMNAME Our-Server
+.RE
+ADMINMAIL admin@example.com
+.RE
+LDAPIPATTR networkAddress
+.RE
+LOCALDOMAIN example.com
+.RE
+INTERNALRANGE 10.0.0.0/8 192.168.0.0/255.255.0.0
+.RE
+.SH SEE ALSO
+
+\fBpam_ldapaccess(8)\fR, \fBpam.d(5)\fR, \fBpam(8)\fR
+
+.SH AUTHORS
+
+Large sections of the code for this module were pilfered from the pam_access source. Credit is due to the authors of this module. The rest is written by Ian Shore <systems@kaust.edu.sa>.
+

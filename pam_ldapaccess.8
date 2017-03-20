@@ -1,0 +1,44 @@
+.TH "PAM_LDAPACCESS" "8" "2016\-12\-21" "" ""
+
+.SH NAME
+
+pam_ldapaccess - PAM module to manage login access via specified IPs/domains in LDAP directory.
+
+.SH SYNOPSIS
+
+\fBpam_ldapaccess.so \fR [debug] [intmessage=\fIfile\fR] [extmessage=\fIfile\fR]
+
+.SH DESCRIPTION
+
+The pam_ldapaccess PAM module provides login access control based on IP addresses/IP address ranges/domains/host names specified by a named attribute in your OpenLDAP directory. IP ranges can be specified in either CIDR or netmask format. Only TLS is supported as the connection protocol to the LDAP directory, and your LDAP client file should be /etc/openldap/ldap.conf.
+
+.SH OPTIONS
+
+\fBdebug\fR
+.RS 4
+A lot of debug information is printed in \fBsyslog\fR(3).
+.RE
+.PP
+\fBintmessage=\fR/path/to/internal-message-file
+.RS 4
+Specify the name of a file that contains a custom message for internal users (domain defined in /etc/security/pam_ldapaccess.conf) who are rejected by pam_ldapaccess.so. By default, the file \fB/etc/pam_ldapaccess.message\fR is used.
+.RE
+.PP
+\fBextmessage=\fR/path/to/external-message-file
+.RS 4
+Specify the name of a file that contains a custom message for external users who are rejected by pam_ldapaccess.so. By default, the file \fB/etc/pam_ldapaccess.message\fR is used.
+.RE
+.PP
+
+.SH MODULE TYPES PROVIDED
+
+This module decides if access is allowed or not after authentication, therefore you should use the \fBaccount\fR module type.
+
+.SH SEE ALSO
+
+\fBpam_ldapaccess.conf(5)\fR, \fBpam.d(5)\fR, \fBpam(8)\fR
+
+.SH AUTHORS
+
+Large sections of the code for this module were pilfered from the pam_access source. Credit is due to the authors of this module. The rest is written by Ian Shore <systems@kaust.edu.sa>.
+
