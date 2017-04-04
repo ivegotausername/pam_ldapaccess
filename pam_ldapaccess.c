@@ -2,8 +2,15 @@
  * pam_ldapaccess - PAM module to allow access via hosts/domains/IPs specified in local
  * LDAP directory. Currently only supports TLS for LDAP queries.
  * Author Ian Shore (ian.shore@kaust.edu.sa)
- * Most of this code has been pilfered from other PAM modules, most notably pam_access, 
+ * Most of this code has been recycled from other PAM modules, most notably pam_access, 
  * credit due to Alexei Nogin and Wietse Venema.
+ *
+ * I don't do much C coding, can you tell?
+ * With thanks to Greg and Jens, for supplying me with bits of neat code when I was
+ * struggling.
+*/
+/*
+ * Version 0.11
 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +27,7 @@
 #include <netdb.h>
 #include <sys/socket.h>   
 #include <netinet/in.h> 
+#include <ctype.h>
 
 // Include PAM headers
 #include <security/pam_appl.h>
@@ -75,32 +83,70 @@ static int parse_args(pam_handle_t *pamh, int argc, const char **argv)
 }
 
 /* Read the server URI and base from the OpenLDAP client file */
-int LoadLDAPSettings(const char *ldap_file, char uri[], char base[] )
+int LoadLDAPSettings(const char *ldap_file, char ***uri_ptr, char **base )
 {
   FILE *iptr;
-  char word[MAX_SIZE];
+  char **uris = malloc( sizeof( char * ) );
+  uris[0] = NULL;
+  size_t uris_len = 0;
 
   if ((iptr=fopen(ldap_file,"r")) == NULL)
   {   
     syslog( LOG_ERR, "pam_ldapaccess: Unable to open file %s.",ldap_file );
     return NO;  
   }
-  else
-  {
-    while (!feof(iptr))
-    {
-      fscanf(iptr, "%s", word);
-      if (strncmp("URI",word,3) == 0)
-        fscanf(iptr, "%s", uri);
-      else if (strncmp("BASE",word,4) == 0)
-        fscanf(iptr, "%s", base);
-    } 
+
+  char line[ MAX_SIZE ];
+  while ( fgets( line, sizeof( line ), iptr ) != NULL ) {
+      size_t len = strlen( line );
+      while (( len > 0 )&&( isspace( line[ len - 1 ] ) ) ) {
+  	 len --;
+  	 line[ len ] = '\0';
+      }
+      const char *ptr = line;
+      while ( isspace( *ptr ) ) {
+          ptr ++;
+      }
+      if (( strncmp( ptr, "URI", 3 ) == 0 )&&( isspace( ptr[ 3 ] ))) {
+          /* matched */
+	  ptr += 3;
+          while ( *ptr ) {
+		while ( isspace( *ptr ) ) {
+		    ptr ++;
+		}
+		if ( ! *ptr ) {
+		    break;
+		}
+    		int ctr;
+		for ( ctr = 0 ; ptr[ ctr ] && ( ! isspace( ptr[ ctr ] )) ; ctr ++ ) {
+		/* ctr = length of bytes */
+		}
+		uris_len ++;
+		uris = (char**)realloc( uris, sizeof( char * ) * ( uris_len + 1 ) );
+		uris[ uris_len - 1 ] = strndup( ptr, ctr );
+		uris[ uris_len ] = NULL;
+        	if (debug == YES) syslog(LOG_NOTICE, "pam_ldapaccess: URI [%s]", uris[ uris_len - 1 ] );
+		/* skip past the copied text */
+		ptr += ctr;
+          }
+    }  else if (( strncmp( ptr, "BASE", 4 ) == 0 )&&( isspace( ptr[ 4 ] ))) {
+	/* matched */
+	ptr += 4;
+	while ( isspace( *ptr ) ) {
+	    ptr ++;
+	}
+	*base = strdup( ptr );
+        if (debug == YES) syslog(LOG_NOTICE, "pam_ldapaccess: BASE [%s]", *base );
+      }
   } 
   fclose(iptr);
-  if (base[0] == '\0' || uri[0] == '\0') 
+
+  if ( *base == NULL || uris[0] == NULL ) {
     return NO;
-  else
+  } else {
+    *uri_ptr = uris;
     return YES;
+  }
 }
 
 /* Read the contents of a file and return the contents */
@@ -551,21 +597,30 @@ int ldapIPcheck( const char *PamUser, const char *PamRhost, const char *LdapIPat
   LDAP *ld;
   LDAPMessage *search_result, *current_entry;
 
-  char **vals, uidstring[24], uristring[MAX_SIZE], basestring[MAX_SIZE];
-  int version, rc, i=-1, ret, PamResult=PAM_PERM_DENIED;
+  char **vals, uidstring[24], initstring[MAX_SIZE], **uristring = NULL, *basestring = NULL;
+  int version, rc, i=0, ret, PamResult=PAM_PERM_DENIED;
   if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Starting ldapIPcheck" );
-  if ((ret = LoadLDAPSettings(LDAP_FILE, uristring, basestring )) != YES)
-  {
+
+  if ((ret = LoadLDAPSettings(LDAP_FILE, &uristring, &basestring )) != YES) {
     syslog( LOG_ERR, "pam_ldapaccess: Missing URI or BASE in ldap config file." );
     return(PamResult);
   }
-  if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: uri=[%s] base=[%s]", uristring, basestring );
+  strcpy(initstring, uristring[i]);
+  for (i=1; uristring[i] != NULL; i++) {
+        strcat(initstring, ",");
+        strcat(initstring, uristring[i]);
+     }
+  if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: initstring is [%s]", initstring);
+
+  /* Use i to determine whether or not the user exists at all in LDAP records. */
+  i=-1;
 
   /* Initialize the LDAP library and open a connection to an LDAP server */
-  if ((ret = ldap_initialize(&ld, uristring)) != LDAP_SUCCESS)
+  if ((ret = ldap_initialize(&ld, initstring)) != LDAP_SUCCESS)
   { 
-     syslog( LOG_ERR, "pam_ldapaccess: Failed to initialise with the LDAP Server.");
-     return(PamResult); 
+    syslog( LOG_ERR, "pam_ldapaccess: Failed to initialise with the LDAP Server.");
+    PamResult=PAM_CONV_ERR;
+    return(PamResult); 
   }
   if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Opened a connection to the LDAP server." );
 
@@ -578,7 +633,12 @@ int ldapIPcheck( const char *PamUser, const char *PamRhost, const char *LdapIPat
   /* Bind to the server. */
   //rc = ldap_simple_bind_s( ld, NULL, NULL );
   rc = ldap_start_tls_s( ld, NULL, NULL );
-  if ( rc != LDAP_SUCCESS ) { /* error */ return(PamResult); }
+  if ( rc != LDAP_SUCCESS ) 
+  { 
+    syslog( LOG_ERR, "pam_ldapaccess: Could not bind to LDAP server [%s]", initstring );
+    PamResult=PAM_CONV_ERR;
+    return(PamResult); 
+  }
   if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Successfully bound to the LDAP server" );
 
   strcpy(uidstring, "(uid=");
@@ -593,6 +653,7 @@ int ldapIPcheck( const char *PamUser, const char *PamRhost, const char *LdapIPat
   if ( rc != LDAP_SUCCESS )
   { 
     if (debug == YES) syslog( LOG_ERR, "pam_ldapaccess: Failed to connect to LDAP server.");
+    PamResult=PAM_CONV_ERR;
     return(PamResult);
   }
 
@@ -659,10 +720,10 @@ int ldapIPcheck( const char *PamUser, const char *PamRhost, const char *LdapIPat
 int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc, const char **argv)
 {
         int PamResult=PAM_IGNORE;
-        //These are defined as 'const char' because they passwd to us from the parent
+        //These are defined as 'const char' because they passed to us from the parent
         //library. When we called pam_get_<whatever> the pam library passes pointers
-        //to strings in it's own code. Thus we must not change or free them
-        const char *pam_user = NULL, *pam_rhost=NULL, *pam_service=NULL;
+        //to strings in its own code. Thus we must not change or free them
+        const char *pam_user = NULL, *pam_rhost = NULL, *pam_service = NULL;
         char pam_ip[INET6_ADDRSTRLEN];
         int i=0;
   
