@@ -10,7 +10,7 @@ pam_ldapaccess - PAM module to manage login access via specified IPs/domains in 
 
 .SH DESCRIPTION
 
-The pam_ldapaccess PAM module provides login access control based on IP addresses/IP address ranges/domains/host names specified by a named attribute in your OpenLDAP directory. IP ranges can be specified in either CIDR or netmask format. Only TLS is supported as the connection protocol to the LDAP directory. The LDAP URIs are read from the LDAP client file /etc/openldap/ldap.conf. The module has only been tested in the PAM sshd file, but may work with others.
+The pam_ldapaccess PAM module provides login access control based on IP addresses/IP address ranges/domains/host names specified by a named attribute in your OpenLDAP directory. IP ranges can be specified in either CIDR or netmask format. Only StartTLS is supported as the connection protocol to the LDAP directory. The LDAP URIs are read from the LDAP client file /etc/openldap/ldap.conf. The module has only been tested in the PAM sshd file, but may work with others.
 
 .SH OPTIONS
 
