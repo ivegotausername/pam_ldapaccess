@@ -1,6 +1,6 @@
 /* 
  * pam_ldapaccess - PAM module to allow access via hosts/domains/IPs specified in local
- * LDAP directory. Currently only supports TLS for LDAP queries.
+ * LDAP directory. Currently only supports StartTLS for LDAP queries.
  * Author Ian Shore (ian.shore@kaust.edu.sa)
  * Most of this code has been recycled from other PAM modules, most notably pam_access, 
  * credit due to Alexei Nogin and Wietse Venema.
@@ -659,21 +659,21 @@ int ldapIPcheck( const char *PamUser, const char *PamRhost, const char *LdapIPat
 
   for (current_entry = ldap_first_entry(ld, search_result); current_entry != NULL; current_entry = ldap_next_entry(ld, current_entry)) 
   {
-    if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Searching for kslIpRange values" );
+    if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Searching for IPrange values" );
     if (( vals = ldap_get_values( ld, current_entry, LdapIPattr )) != NULL ) 
     {
       for (i=0; vals[i] != NULL; i++) 
       {
-        if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: user=[%s] rhost=[%s] KslIprange[%s]", PamUser, PamRhost, vals[i] );
+        if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: user=[%s] rhost=[%s] IPrange[%s]", PamUser, PamRhost, vals[i] );
         if (domain_grep(PamRhost, vals[i]))
         {
-           syslog( LOG_NOTICE, "pam_ldapaccess: user=[%s] rhost=[%s] KslIprange[%s] STRING MATCH FOUND!!!", PamUser, PamRhost, vals[i] );
+           syslog( LOG_NOTICE, "pam_ldapaccess: user=[%s] rhost=[%s] IPrange[%s] STRING MATCH FOUND!!!", PamUser, PamRhost, vals[i] );
            PamResult=PAM_SUCCESS;
            break;
         }
         else if (network_netmask_match(vals[i], PamRhost))
         {
-           syslog( LOG_NOTICE, "pam_ldapaccess: user=[%s] rhost=[%s] KslIprange[%s] IP FOUND!!!", PamUser, PamRhost, vals[i] );
+           syslog( LOG_NOTICE, "pam_ldapaccess: user=[%s] rhost=[%s] IPrange[%s] IP FOUND!!!", PamUser, PamRhost, vals[i] );
            PamResult=PAM_SUCCESS;
            break;
         }
