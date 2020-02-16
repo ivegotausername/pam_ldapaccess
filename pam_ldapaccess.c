@@ -854,7 +854,7 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc, const char **argv)
           if ((fp2=fdopen(fd2,"w")) == NULL)
             return PAM_ABORT;
 
-          pam_info(pamh, "\nYou are logging into %s from %s (%s), which is\nnot in the list of IP ranges authorised for %s.", systemname, pam_rhost, pam_ip, pam_user);
+          pam_info(pamh, "\nYou are logging into %s from %s (%s), which is not in the list of IP ranges authorised for %s.", systemname, pam_rhost, pam_ip, pam_user);
           if (domain_grep(ldapmail, localdomain))
             lines = ReadFile(intmessage);
           else
@@ -866,8 +866,8 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc, const char **argv)
           fprintf( fp2, "To: %s\n",adminmail);
           fprintf( fp1, "Subject: Rejected %s from %s\n", pam_user, pam_rhost);
           fprintf( fp2, "Subject: Rejected %s from %s\n", pam_user, pam_rhost);
-          fprintf( fp1, "You are logging into %s from %s (%s), which is\nnot in the list of IP ranges authorised for %s.\n", systemname, pam_rhost, pam_ip, pam_user);
-          fprintf( fp2, "User %s logged into %s from %s (%s), which is\nnot in their list of IP ranges.\n", pam_user, systemname, pam_rhost, pam_ip);
+          fprintf( fp1, "You are logging into %s from %s (%s), which is not in the list of IP ranges authorised for %s.\n", systemname, pam_rhost, pam_ip, pam_user);
+          fprintf( fp2, "User %s logged into %s from %s (%s), which is not in their list of IP ranges.\n", pam_user, systemname, pam_rhost, pam_ip);
           fprintf( fp1, "%s\n", lines );
           fprintf( fp2, "%s\n", lines );
           fclose( fp1 );
