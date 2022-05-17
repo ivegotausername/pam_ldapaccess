@@ -5,12 +5,11 @@
  * Most of this code has been recycled from other PAM modules, most notably pam_access, 
  * credit due to Alexei Nogin and Wietse Venema.
  *
- * I don't do much C coding, can you tell?
  * With thanks to Greg and Jens, for supplying me with bits of neat code when I was
  * struggling.
 */
 /*
- * Version 0.12
+ * Version 0.20
 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,6 +50,7 @@
 #define LDAP_FILE "/etc/openldap/ldap.conf"
 #define SETTINGS_FILE "/etc/security/pam_ldapaccess.conf"
 #define MAX_SIZE 512
+#define VERSION "0.20"
 
 #if !defined(MAXHOSTNAMELEN) || (MAXHOSTNAMELEN < 64)
 #undef MAXHOSTNAMELEN
@@ -59,7 +59,7 @@
 #define YES             1
 #define NO              0
 
-int debug = NO;
+int debug = NO, check_whois_for_domain = NO;
 char ldapmail[MAX_SIZE];
 const char *intmessage="/etc/pam_ldapaccess.message", *extmessage="/etc/pam_ldapaccess.message";
 
@@ -71,6 +71,8 @@ static int parse_args(pam_handle_t *pamh, int argc, const char **argv)
   {
     if (strcmp(argv[i], "debug") == 0) 
        debug = YES;
+    else if (strcmp(argv[i], "whois") == 0)
+       check_whois_for_domain = YES;
     else if (!strncasecmp("intmessage=", argv[i], 10))
        intmessage=argv[i]+11;
     else if (!strncasecmp("extmessage=", argv[i], 10)) 
@@ -78,7 +80,6 @@ static int parse_args(pam_handle_t *pamh, int argc, const char **argv)
     else
       syslog( LOG_ERR, "pam_ldapaccess: Unrecognized option [%s]", argv[i]);
   }  
-  if (debug == YES) syslog(LOG_NOTICE, "pam_ldapaccess: Internal message file [%s] external message file [%s]",intmessage, extmessage);
   return YES;
 }
 
@@ -125,7 +126,8 @@ int LoadLDAPSettings(const char *ldap_file, char ***uri_ptr, char **base )
 		uris = (char**)realloc( uris, sizeof( char * ) * ( uris_len + 1 ) );
 		uris[ uris_len - 1 ] = strndup( ptr, ctr );
 		uris[ uris_len ] = NULL;
-        	if (debug == YES) syslog(LOG_NOTICE, "pam_ldapaccess: URI [%s]", uris[ uris_len - 1 ] );
+        	if (debug == YES) 
+			syslog(LOG_NOTICE, "pam_ldapaccess: URI [%s]", uris[ uris_len - 1 ] );
 		/* skip past the copied text */
 		ptr += ctr;
           }
@@ -136,7 +138,8 @@ int LoadLDAPSettings(const char *ldap_file, char ***uri_ptr, char **base )
 	    ptr ++;
 	}
 	*base = strdup( ptr );
-        if (debug == YES) syslog(LOG_NOTICE, "pam_ldapaccess: BASE [%s]", *base );
+        if (debug == YES) 
+		syslog(LOG_NOTICE, "pam_ldapaccess: BASE [%s]", *base );
       }
   } 
   fclose(iptr);
@@ -190,7 +193,7 @@ char* ReadFile(const char *filename)
     return buffer;
 }
 
-/* Compare the pam_rhost domain with domain specified in LDAP */
+/* Compare the string with domain specified in LDAP */
 bool domain_grep(const char* ref, const char* sub)
 {
 
@@ -252,10 +255,12 @@ int whois_query(char *server , char *query , char **response)
     memset( &dest , 0 , sizeof(dest) );
     dest.sin_family = AF_INET;
 
-    if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Resolving [%s]", server);
+    if (debug == YES) 
+	    syslog( LOG_NOTICE, "pam_ldapaccess: Resolving [%s]", server);
     if (hostname_to_ip(server, ip) != YES)
     {
-        if (debug == YES) syslog( LOG_ERR, "pam_ldapaccess: Failed converting [%s] to ip [%s]", server, ip);
+        if (debug == YES) 
+		syslog( LOG_ERR, "pam_ldapaccess: Failed converting [%s] to ip [%s]", server, ip);
         return NO;
     }
     printf("%s" , ip);
@@ -270,7 +275,8 @@ int whois_query(char *server , char *query , char **response)
     }
 
     //Now send some data or message
-    if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Querying for [%s]", query);
+    if (debug == YES) 
+	    syslog( LOG_NOTICE, "pam_ldapaccess: Querying for [%s]", query);
     sprintf(message , "%s\r\n" , query);
     if( send(sock , message , strlen(message) , 0) < 0)
     {
@@ -299,10 +305,50 @@ int whois_query(char *server , char *query , char **response)
     return YES;
 }
 
+/* Get the referral server from the the whois output */
+char* get_arin_referral(char *ip)
+{
+    char *wch = NULL, *pch , *response = NULL, *referral_server = NULL;
+
+    if (whois_query("whois.arin.net" , ip , &response) != YES )
+    {
+       syslog(LOG_ERR, "pam_ldapaccess: whois.arin.net query failed, ip [%s] response [%s]", ip, response);
+       return NULL;
+    }
+
+    pch = strtok(response , "\n");
+
+    while(pch != NULL)
+    {
+        /* Check whois line for ARIN Referral Server  */
+        wch = strstr(pch , "whois://");
+        if(wch != NULL)
+        {
+            referral_server = strdup(wch + 8);
+            break;
+        }
+
+        //Next line please
+        pch = strtok(NULL , "\n");
+    }
+    if (referral_server != NULL)
+    {
+      if (debug == YES) 
+	      syslog(LOG_NOTICE, "pam_ldapaccess: referral server is [%s]", referral_server);
+      return referral_server;
+    }
+    else
+    {
+      if (debug ==YES)
+	      syslog(LOG_NOTICE, "pam_ldapaccess: whois.arin.net query, no referral server found");
+      return NULL;
+    }  
+}
+
 /* Get the whois content of an ip by selecting the correct server */
 int get_whois(char *ip , char **data)
 {
-    char *wch = NULL, *pch , *response = NULL;
+    char *wch = NULL, *pch , *tmpch = NULL, *response = NULL;
 
     if (whois_query("whois.iana.org" , ip , &response) != YES )
     {
@@ -327,7 +373,23 @@ int get_whois(char *ip , char **data)
 
     if(wch != NULL)
     {
-        if (debug == YES) syslog(LOG_NOTICE, "pam_ldapaccess: Whois server is [%s]", wch);
+        if (debug == YES) 
+		syslog(LOG_NOTICE, "pam_ldapaccess: Whois server is [%s]", wch);
+	if (strcmp(wch, "whois.arin.net") == 0)
+	{
+          if (debug == YES) 
+		  syslog(LOG_NOTICE, "pam_ldapaccess: Checking for referral server on [%s]", wch);
+          tmpch = get_arin_referral(ip); 
+          if (tmpch  == NULL)
+             syslog(LOG_NOTICE, "pam_ldapaccess: Whois query found no referral server, [%s]", tmpch);
+	  else
+          {
+             syslog(LOG_NOTICE, "pam_ldapaccess: Whois query found referral server, [%s]", tmpch);
+	     strcpy(wch,tmpch);
+	  }
+	}
+        if (debug == YES) 
+		syslog(LOG_NOTICE, "pam_ldapaccess: wch [%s] ip [%s] response [%s]", wch, ip, response);
         if (whois_query(wch , ip , data) != YES)
         {
            syslog(LOG_ERR, "pam_ldapaccess: Whois query failed, wch [%s] ip [%s] response [%s]", wch, ip, response);
@@ -381,6 +443,44 @@ static int isipaddr (const char *string, int *addr_type, struct sockaddr_storage
 
   return is_ip;
 }
+
+/* Get the domain for the organisation from the the whois output */
+int grep_domain_from_whois(const char *ip, const char *domain)
+{
+    char *wch = NULL, *pch , *tmpch = NULL, *whoisdata = NULL;
+
+    tmpch = strdup(ip);
+
+    syslog( LOG_NOTICE, "pam_ldapaccess: Checking for [%s] in whois output", domain);   
+    if ( get_whois(tmpch, &whoisdata) == NO )
+    {
+       if (debug == YES)
+         syslog( LOG_NOTICE, "pam_ldapaccess: Whois data could not be found [%s]", tmpch);
+       return NO;
+    }
+    else
+    {
+      pch = strtok(whoisdata, "\n");
+
+      while(pch != NULL)
+      {
+          /* Check whois line for domain  */
+          wch = strstr(pch , domain);
+          if(wch != NULL)
+          {
+              if (debug == YES)
+                 syslog(LOG_NOTICE, "pam_ldapaccess: matched whois string is [%s]", wch);
+              return YES;
+          }
+
+          /* Next line */
+          pch = strtok(NULL , "\n");
+      }
+    }
+    free(whoisdata);
+    return NO;
+}
+
 
 /* are_addresses_equal - translate IP address strings to real IP
    addresses and compare them to find out if they are equal.
@@ -501,7 +601,8 @@ static int network_netmask_match (const char *tok, const char *string)
     int gai_rv=0;               /* Cached retval of getaddrinfo */
     struct addrinfo *res;       /* Cached DNS resolution of from */
 
-    if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Starting network_netmask_match. Tok is [%s], string is [%s]", tok,string );
+    if (debug == YES) 
+	    syslog( LOG_NOTICE, "pam_ldapaccess: Starting network_netmask_match. Tok is [%s], string is [%s]", tok,string );
     /* OK, check if tok is of type addr/mask */
     if ((netmask_ptr = strchr(tok, '/')) != NULL)
     {
@@ -511,14 +612,16 @@ static int network_netmask_match (const char *tok, const char *string)
       *netmask_ptr = 0;
       netmask_ptr++;
 
-      if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Starting isipaddr 1 - checking if [%s] is an IP address", tok);
+      if (debug == YES) 
+	      syslog( LOG_NOTICE, "pam_ldapaccess: Starting isipaddr 1 - checking if [%s] is an IP address", tok);
       if (isipaddr(tok, &addr_type, NULL) == NO)
       { /* no netaddr */
           return NO;
       }
 
       /* check netmask */
-      if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Starting isipaddr 2 - checking if [%s] is an IP address", netmask_ptr );
+      if (debug == YES) 
+	      syslog( LOG_NOTICE, "pam_ldapaccess: Starting isipaddr 2 - checking if [%s] is an IP address", netmask_ptr );
       if (isipaddr(netmask_ptr, NULL, NULL) == NO)
       { /* netmask as integer value */
           char *endptr = NULL;
@@ -538,11 +641,13 @@ static int network_netmask_match (const char *tok, const char *string)
     /* NO, then check if it is only an addr */
     else if (isipaddr(tok, NULL, NULL) != YES)
     {
-       if (debug == YES) syslog( LOG_ERR, "pam_ldapaccess: isipaddr 3 reckons [%s] is not an IP address", tok );
+       if (debug == YES) 
+	       syslog( LOG_NOTICE, "pam_ldapaccess: isipaddr 3 reckons [%s] is not an IP address", tok );
        return NO;
     }
 
-    if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Starting isipaddr 4 - checking if string [%s] is an IP address",string );
+    if (debug == YES) 
+	    syslog( LOG_NOTICE, "pam_ldapaccess: Starting isipaddr 4 - checking if string [%s] is an IP address",string );
     if (isipaddr(string, NULL, NULL) != YES)
     {
       /* Assume network/netmask with a name of a host.  */
@@ -552,29 +657,34 @@ static int network_netmask_match (const char *tok, const char *string)
       hint.ai_flags = AI_CANONNAME;
       hint.ai_family = AF_UNSPEC;
 
-      if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Checking gai_rv - Value is [%d]", gai_rv );
+      if (debug == YES) 
+	      syslog( LOG_NOTICE, "pam_ldapaccess: Checking gai_rv - Value is [%d]", gai_rv );
       if (gai_rv != 0)
       {
-          if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Not equal to zero " );
+          if (debug == YES) 
+		  syslog( LOG_NOTICE, "pam_ldapaccess: Not equal to zero " );
           return NO;
       }
       else if (!res && (gai_rv = getaddrinfo (string, NULL, &hint, &res)) != 0)
       {
-          if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Failed when running getaddrinfo" );
+          if (debug == YES) 
+		  syslog( LOG_NOTICE, "pam_ldapaccess: Failed when running getaddrinfo" );
           return NO;
       }
       else
       {
 
          char buf[INET6_ADDRSTRLEN];
-         if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Converting hostname to IP address" );
-
+         if (debug == YES) 
+		 syslog( LOG_NOTICE, "pam_ldapaccess: Converting hostname to IP address" );
          if (hostname_to_ip(string, buf) != YES)
          {
-           if (debug == YES) syslog( LOG_ERR, "pam_ldapaccess: FAILED to convert hostname to IP address" );
+           if (debug == YES) 
+		   syslog( LOG_ERR, "pam_ldapaccess: FAILED to convert hostname to IP address" );
            return NO;
          }
-         if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Running are_addresses_equal 1 - buf [%s] tok [%s] netmask_ptr [%s]", buf, tok, netmask_ptr );
+         if (debug == YES) 
+		 syslog( LOG_NOTICE, "pam_ldapaccess: Running are_addresses_equal 1 - buf [%s] tok [%s] netmask_ptr [%s]", buf, tok, netmask_ptr );
          if (are_addresses_equal(buf, tok, netmask_ptr))
          {
             return YES;
@@ -583,11 +693,13 @@ static int network_netmask_match (const char *tok, const char *string)
     } 
     else
     {
-      if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Running are_addresses_equal 2 - string [%s] tok [%s] netmask_ptr [%s]", string, tok, netmask_ptr  );
+      if (debug == YES) 
+	      syslog( LOG_NOTICE, "pam_ldapaccess: Running are_addresses_equal 2 - string [%s] tok [%s] netmask_ptr [%s]", string, tok, netmask_ptr  );
       return (are_addresses_equal(string, tok, netmask_ptr));
     } 
 
-  if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Ending network_netmask_match" );
+  if (debug == YES) 
+	  syslog( LOG_NOTICE, "pam_ldapaccess: Ending network_netmask_match" );
   return NO;
 }
 
@@ -599,7 +711,8 @@ int ldapIPcheck( const char *PamUser, const char *PamRhost, const char *LdapIPat
 
   char **vals, uidstring[24], initstring[MAX_SIZE], **uristring = NULL, *basestring = NULL;
   int version, rc, i=0, ret, PamResult=PAM_PERM_DENIED;
-  if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Starting ldapIPcheck" );
+  if (debug == YES) 
+	  syslog( LOG_NOTICE, "pam_ldapaccess: Starting ldapIPcheck" );
 
   if ((ret = LoadLDAPSettings(LDAP_FILE, &uristring, &basestring )) != YES) {
     syslog( LOG_ERR, "pam_ldapaccess: Missing URI or BASE in ldap config file." );
@@ -610,7 +723,8 @@ int ldapIPcheck( const char *PamUser, const char *PamRhost, const char *LdapIPat
         strcat(initstring, ",");
         strcat(initstring, uristring[i]);
      }
-  if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: initstring is [%s]", initstring);
+  if (debug == YES) 
+	  syslog( LOG_NOTICE, "pam_ldapaccess: initstring is [%s]", initstring);
 
   /* Use i to determine whether or not the user exists at all in LDAP records. */
   i=-1;
@@ -622,14 +736,17 @@ int ldapIPcheck( const char *PamUser, const char *PamRhost, const char *LdapIPat
     PamResult=PAM_CONV_ERR;
     return(PamResult); 
   }
-  if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Opened a connection to the LDAP server." );
+  if (debug == YES) 
+	  syslog( LOG_NOTICE, "pam_ldapaccess: Opened a connection to the LDAP server." );
 
   /* For TPF, set the client to an LDAPv3 client. */
   version = LDAP_VERSION3;
-  if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Setting the client to LDAPv3 client." );
+  if (debug == YES) 
+	  syslog( LOG_NOTICE, "pam_ldapaccess: Setting the client to LDAPv3 client." );
   ldap_set_option( ld, LDAP_OPT_PROTOCOL_VERSION, &version ); 
 
-  if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Binding to the LDAP server" );
+  if (debug == YES) 
+	  syslog( LOG_NOTICE, "pam_ldapaccess: Binding to the LDAP server" );
   /* Bind to the server. */
   //rc = ldap_simple_bind_s( ld, NULL, NULL );
   rc = ldap_start_tls_s( ld, NULL, NULL );
@@ -639,44 +756,54 @@ int ldapIPcheck( const char *PamUser, const char *PamRhost, const char *LdapIPat
     PamResult=PAM_CONV_ERR;
     return(PamResult); 
   }
-  if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Successfully bound to the LDAP server" );
-
+  if (debug == YES) 
+	  syslog( LOG_NOTICE, "pam_ldapaccess: Successfully bound to the LDAP server" );
   strcpy(uidstring, "(uid=");
   strcat(uidstring, PamUser);
   strcat(uidstring, ")");
   
-  if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Search string is %s", uidstring );
+  if (debug == YES) 
+	  syslog( LOG_NOTICE, "pam_ldapaccess: Search string is %s", uidstring );
 
   /* Perform the LDAP search */
   rc = ldap_search_ext_s( ld, basestring, LDAP_SCOPE_SUBTREE, uidstring, NULL, 0, NULL, NULL, NULL, 0, &search_result );
 
   if ( rc != LDAP_SUCCESS )
   { 
-    if (debug == YES) syslog( LOG_ERR, "pam_ldapaccess: Failed to connect to LDAP server.");
+    if (debug == YES) 
+	    syslog( LOG_ERR, "pam_ldapaccess: Failed to connect to LDAP server.");
     PamResult=PAM_CONV_ERR;
     return(PamResult);
   }
 
   for (current_entry = ldap_first_entry(ld, search_result); current_entry != NULL; current_entry = ldap_next_entry(ld, current_entry)) 
   {
-    if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: Searching for IPrange values" );
+    if (debug == YES) 
+	    syslog( LOG_NOTICE, "pam_ldapaccess: Searching for IPrange values" );
     if (( vals = ldap_get_values( ld, current_entry, LdapIPattr )) != NULL ) 
     {
       for (i=0; vals[i] != NULL; i++) 
       {
-        if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: user=[%s] rhost=[%s] IPrange[%s]", PamUser, PamRhost, vals[i] );
+        if (debug == YES) 
+		syslog( LOG_NOTICE, "pam_ldapaccess: user=[%s] rhost=[%s] IPrange[%s]", PamUser, PamRhost, vals[i] );
         if (domain_grep(PamRhost, vals[i]))
         {
-           syslog( LOG_NOTICE, "pam_ldapaccess: user=[%s] rhost=[%s] IPrange[%s] STRING MATCH FOUND!!!", PamUser, PamRhost, vals[i] );
+           syslog( LOG_NOTICE, "pam_ldapaccess: user=[%s] rhost=[%s] IPrange[%s] DOMAIN MATCH FOUND!", PamUser, PamRhost, vals[i] );
            PamResult=PAM_SUCCESS;
            break;
         }
         else if (network_netmask_match(vals[i], PamRhost))
         {
-           syslog( LOG_NOTICE, "pam_ldapaccess: user=[%s] rhost=[%s] IPrange[%s] IP FOUND!!!", PamUser, PamRhost, vals[i] );
+           syslog( LOG_NOTICE, "pam_ldapaccess: user=[%s] rhost=[%s] IPrange[%s] IP FOUND!", PamUser, PamRhost, vals[i] );
            PamResult=PAM_SUCCESS;
            break;
         }
+	else if ((check_whois_for_domain == YES) && (isipaddr(vals[i], NULL, NULL) == NO) && (grep_domain_from_whois(PamRhost, vals[i]) == YES)) 
+        {
+           syslog( LOG_NOTICE, "pam_ldapaccess: user=[%s] rhost=[%s] IPrange[%s] DOMAIN FOUND IN WHOIS DATA!", PamUser, PamRhost, vals[i] );
+           PamResult=PAM_SUCCESS;
+           break;	   
+	}
       }
       ldap_memfree(vals);
     }
@@ -688,7 +815,8 @@ int ldapIPcheck( const char *PamUser, const char *PamRhost, const char *LdapIPat
     {
       for (i=0; vals[i] != NULL; i++)
       {
-        if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: user=[%s] rhost=[%s] mail=[%s]", PamUser, PamRhost, vals[i] ); 
+        if (debug == YES) 
+		syslog( LOG_NOTICE, "pam_ldapaccess: user=[%s] rhost=[%s] mail=[%s]", PamUser, PamRhost, vals[i] ); 
         strncpy(ldapmail, vals[i], strlen(vals[i])+1);
       }
       ldap_memfree(vals);
@@ -701,7 +829,8 @@ int ldapIPcheck( const char *PamUser, const char *PamRhost, const char *LdapIPat
  
   /* If User is not in LDAP database at all, assume success. */
   if ( i == -1 ) {
-    if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: User not found in LDAP database. Must be internal." );
+    if (debug == YES) 
+	    syslog( LOG_NOTICE, "pam_ldapaccess: User not found in LDAP database. Must be internal." );
     PamResult=PAM_SUCCESS;
   }
 
@@ -755,14 +884,18 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc, const char **argv)
                         return(PAM_IGNORE);
         }
 
-        syslog(LOG_NOTICE, "pam_ldapaccess: user=[%s] rhost=[%s]",pam_user, pam_rhost);
-        
         if (!parse_args(pamh, argc, argv)) 
         {
            syslog(LOG_ERR, "pam_ldapaccess: Failed to parse the module arguments");
            return PAM_ABORT;
         }
 
+        if (debug == YES) 
+	{
+		syslog(LOG_NOTICE, "pam_ldapaccess: Version %s", VERSION); 
+		syslog(LOG_NOTICE, "pam_ldapaccess: Internal message file [%s] external message file [%s]",intmessage, extmessage);
+	}
+        syslog(LOG_NOTICE, "pam_ldapaccess: user=[%s] rhost=[%s]",pam_user, pam_rhost);
         if (isipaddr(pam_rhost, NULL, NULL) == YES)
         {
           strncpy(pam_ip,pam_rhost,strlen(pam_rhost)+1);
@@ -774,7 +907,8 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc, const char **argv)
             return PAM_ABORT;
           }
     
-        if (debug == YES) syslog(LOG_NOTICE, "pam_ldapaccess: Client IP address is [%s]", pam_ip); 
+        if (debug == YES) 
+		syslog(LOG_NOTICE, "pam_ldapaccess: Client IP address is [%s]", pam_ip); 
 
         char adminmail[MAX_SIZE] = "root", systemname[MAX_SIZE] = "system", *internalrange[4], 
              ldapipattr[MAX_SIZE] = "networkAddress", localdomain[MAX_SIZE] = "example.com", word[MAX_SIZE], 
@@ -785,7 +919,8 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc, const char **argv)
         memset(line,0,sizeof(line));
         internalrange[0] = NULL;
 
-        if (debug ==YES) syslog( LOG_NOTICE, "pam_ldapaccess: Reading settings file %s.", SETTINGS_FILE);
+        if (debug ==YES) 
+		syslog( LOG_NOTICE, "pam_ldapaccess: Reading settings file %s.", SETTINGS_FILE);
         if ((iptr = fopen(SETTINGS_FILE, "r")) != NULL)
         {
           while (!feof(iptr))
@@ -818,22 +953,29 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc, const char **argv)
             }
           }
         }
-        if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: mail [%s] system [%s] internal [%s]", adminmail, systemname, internalrange[0] );
-
-        if (debug == YES)
+        if (debug == YES) 
+		syslog( LOG_NOTICE, "pam_ldapaccess: mail [%s] system [%s]", adminmail, systemname );
+        if (debug == YES) 
           for (i=0; internalrange[i] != NULL; i++)
           {
-            syslog( LOG_NOTICE, "pam_ldapaccess: internalrange[%d] is %s",i,internalrange[i]);
+              syslog( LOG_NOTICE, "pam_ldapaccess: internalrange[%d] is %s",i,internalrange[i]);
           }
 
         for (i=0; internalrange[i] != NULL; i++)
         {
-          if (debug == YES) syslog( LOG_NOTICE, "pam_ldapaccess: internalrange[%d] is %s",i,internalrange[i]);
+          if (debug == YES) 
+                  syslog( LOG_NOTICE, "pam_ldapaccess: Checking if user is coming in from internal range %s",internalrange[i]);
           if (network_netmask_match(internalrange[i], pam_rhost))
           {
-            if (debug == YES) syslog(LOG_NOTICE, "pam_ldapaccess: Found host [%s] in internal range [%s].", pam_rhost, internalrange[i]);
+            if (debug == YES) 
+		    syslog(LOG_NOTICE, "pam_ldapaccess: Found host [%s] in internal range [%s].", pam_rhost, internalrange[i]);
             return PAM_SUCCESS; 
           }
+	  else
+          {
+            if (debug == YES) 
+		    syslog(LOG_NOTICE, "pam_ldapaccess: Host [%s] not found in internal range [%s].", pam_rhost, internalrange[i]);
+	  }
         } 
 
         PamResult=ldapIPcheck(pam_user, pam_rhost, ldapipattr);
@@ -842,7 +984,7 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc, const char **argv)
           char *lines = NULL, *whoisdata = NULL, cmd[100],fname1[PATH_MAX],fname2[PATH_MAX];
           static char template[] = "/var/tmp/pam_ldapaccess.XXXXXX";
 
-          syslog(LOG_ERR, "pam_ldapaccess: Refused connection for %s from %s", pam_user, pam_ip);
+          syslog(LOG_NOTICE, "pam_ldapaccess: Refused connection for %s from %s", pam_user, pam_ip);
           
           strcpy(fname1, template);
           strcpy(fname2, template);
@@ -854,7 +996,10 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc, const char **argv)
           if ((fp2=fdopen(fd2,"w")) == NULL)
             return PAM_ABORT;
 
-          pam_info(pamh, "\nYou are logging into %s from %s (%s), which is not in the list of IP ranges authorised for %s.", systemname, pam_rhost, pam_ip, pam_user);
+	  if (strcmp(pam_rhost, pam_ip) == 0)
+            pam_info(pamh, "\nYou are logging into %s from %s, which is not in the list of IP ranges authorised for %s.", systemname, pam_ip, pam_user);
+	  else
+            pam_info(pamh, "\nYou are logging into %s from %s (%s), which is not in the list of IP ranges authorised for %s.", systemname, pam_rhost, pam_ip, pam_user);
           if (domain_grep(ldapmail, localdomain))
             lines = ReadFile(intmessage);
           else
@@ -866,32 +1011,44 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc, const char **argv)
           fprintf( fp2, "To: %s\n",adminmail);
           fprintf( fp1, "Subject: Rejected %s from %s\n", pam_user, pam_rhost);
           fprintf( fp2, "Subject: Rejected %s from %s\n", pam_user, pam_rhost);
-          fprintf( fp1, "You are logging into %s from %s (%s), which is not in the list of IP ranges authorised for %s.\n", systemname, pam_rhost, pam_ip, pam_user);
-          fprintf( fp2, "User %s logged into %s from %s (%s), which is not in their list of IP ranges.\n", pam_user, systemname, pam_rhost, pam_ip);
+	  if (strcmp(pam_rhost, pam_ip) == 0)
+          {
+            fprintf( fp1, "You are logging into %s from %s, which is not in the list of IP ranges authorised for %s.\n\n", systemname, pam_ip, pam_user);
+            fprintf( fp2, "User %s logged into %s from %s, which is not in their list of IP ranges.\n\n", pam_user, systemname, pam_ip);
+	  }
+	  else
+	  {
+            fprintf( fp1, "You are logging into %s from %s (%s), which is not in the list of IP ranges authorised for %s.\n\n", systemname, pam_rhost, pam_ip, pam_user);
+            fprintf( fp2, "User %s logged into %s from %s (%s), which is not in their list of IP ranges.\n\n", pam_user, systemname, pam_rhost, pam_ip);
+	  }
           fprintf( fp1, "%s\n", lines );
-          fprintf( fp2, "%s\n", lines );
           fclose( fp1 );
           free(lines);
 
           sprintf(cmd,"/usr/sbin/sendmail -t < %s",fname1); // prepare command.
-          if (debug == YES) syslog(LOG_NOTICE, "pam_ldapaccess: Sending mail, user mail=[%s]", ldapmail);
+          if (debug == YES) 
+		  syslog(LOG_NOTICE, "pam_ldapaccess: Sending mail, user mail=[%s]", ldapmail);
           if (system(cmd) != 0)
             syslog( LOG_ERR, "pam_ldapaccess: Failed to send mail to [%s]", ldapmail);   
           unlink(fname1);
 
-          if (debug == YES) syslog(LOG_NOTICE, "pam_ldapaccess: Finding whois data for: %s", pam_ip);
+          if (debug == YES) 
+		  syslog(LOG_NOTICE, "pam_ldapaccess: Finding whois data for: %s", pam_ip);
           if ( get_whois(pam_ip, &whoisdata) != NO )
           {
-            if (debug == YES) syslog(LOG_NOTICE, "pam_ldapaccess: Finished whois data for: %s", pam_ip);
+            if (debug == YES) 
+		    syslog(LOG_NOTICE, "pam_ldapaccess: Finished whois data for: %s", pam_ip);
             fprintf( fp2, "%s", whoisdata );
           }
           else
             fprintf( fp2, "Whois server could not be contacted.\n"  );
-          if (debug == YES) syslog(LOG_NOTICE, "pam_ldapaccess: Finished writing whois data");
+          if (debug == YES) 
+		  syslog(LOG_NOTICE, "pam_ldapaccess: Finished writing whois data");
           fclose(fp2);
           free(whoisdata);
           sprintf(cmd,"/usr/sbin/sendmail -t < %s",fname2); // prepare command.
-          if (debug == YES) syslog(LOG_NOTICE, "pam_ldapaccess: Sending mail, user mail=[%s]", adminmail);
+          if (debug == YES) 
+		  syslog(LOG_NOTICE, "pam_ldapaccess: Sending mail, user mail=[%s]", adminmail);
           if (system(cmd) != 0)
             syslog( LOG_ERR, "pam_ldapaccess: Failed to send mail to [%s]", adminmail);   
           unlink(fname2);
