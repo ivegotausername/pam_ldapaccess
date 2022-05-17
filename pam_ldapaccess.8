@@ -29,7 +29,7 @@ Specify the name of a file that contains a custom message for internal users (do
 Specify the name of a file that contains a custom message for external users who are rejected by pam_ldapaccess.so. By default, the file \fB/etc/pam_ldapaccess.message\fR is used.
 .RE
 .PP
-\fBwhois=\fR
+\fBwhois\fR
 .RS 4
 USE WITH CAUTION. Some Internet providers, typically mobile operators, manage a wide variety of IP ranges that are typically not static and cannot be reverse DNS mapped. This option will force pam_ldapaccess to sift through the whois output associated with the rhost IP address and return true if there is a match for any LDAP domain entry.
 .RE
