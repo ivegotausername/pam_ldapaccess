@@ -6,7 +6,7 @@ pam_ldapaccess.conf - configuration file for the pam_ldapaccess module
 
 .SH DESCRIPTION
 
-The pam_ldapaccess PAM module provides login access control based on IP addresses/IP address ranges/domains/host names specified by a named attribute in your OpenLDAP directory. IP ranges can be specified in either CIDR or netmask format. Configuration options are placed in the /etc/security/pam_ldapaccess.conf file. 
+The pam_ldapaccess PAM module provides login access control based on IP addresses/IP address ranges/domains/host names specified by a named attribute in your OpenLDAP directory. IP ranges can be specified in either CIDR or netmask format. Configuration options are placed in the /etc/security/pam_ldapaccess.conf file. For each failed login attempt, an email is sent to the user informing them that they are trying to connect from an unauthorised location, and an email with the same information is sent to the root account.
 
 .SH OPTIONS
 \fBSYSTEMNAME\fR
@@ -17,6 +17,11 @@ The name of your service, hostname, etc. This is used in the failed login attemp
 \fBADMINMAIL\fR
 .RS 4
 The admin email account. An email is sent to this account for every failed login attempt, providing user id and hostname information (Default - root).
+.RE
+.PP
+\fBMAILFROM\fR
+.RS 4
+The email account that sends the mail to the user (Default - root). 
 .RE
 .PP
 \fBLDAPIPATTR\fR
@@ -38,6 +43,8 @@ A range or list of space separated IP ranges, specified in either CIDR or netmas
 SYSTEMNAME Our-Server
 .RE
 ADMINMAIL admin@example.com
+.RE
+MAILFROM no-reply@example.com 
 .RE
 LDAPIPATTR networkAddress
 .RE

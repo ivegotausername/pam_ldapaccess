@@ -9,7 +9,7 @@
  * struggling.
 */
 /*
- * Version 0.20
+ * Version 0.21
 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -912,7 +912,7 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc, const char **argv)
 
         char adminmail[MAX_SIZE] = "root", systemname[MAX_SIZE] = "system", *internalrange[4], 
              ldapipattr[MAX_SIZE] = "networkAddress", localdomain[MAX_SIZE] = "example.com", word[MAX_SIZE], 
-              line[MAX_SIZE];
+             line[MAX_SIZE], mailfrom[MAX_SIZE]= "root";
         FILE *iptr;
 
         memset(word,0,sizeof(word));
@@ -934,6 +934,8 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc, const char **argv)
               fscanf(iptr, "%s", ldapipattr);
             else if (strncasecmp("LOCALDOMAIN",word,11) == 0)
               fscanf(iptr, "%s", localdomain);
+            else if (strncasecmp("MAILFROM",word,8) == 0)
+              fscanf(iptr, "%s", mailfrom);
             else if (strncasecmp("INTERNALRANGE",word,13) == 0)
             {
               if (fgets(line, MAX_SIZE, iptr) != NULL)
@@ -981,7 +983,7 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc, const char **argv)
         PamResult=ldapIPcheck(pam_user, pam_rhost, ldapipattr);
         if ( PamResult == PAM_PERM_DENIED )
         {
-          char *lines = NULL, *whoisdata = NULL, cmd[100],fname1[PATH_MAX],fname2[PATH_MAX];
+          char *lines = NULL, *whoisdata = NULL, cmd[8192],fname1[PATH_MAX],fname2[PATH_MAX];
           static char template[] = "/var/tmp/pam_ldapaccess.XXXXXX";
 
           syslog(LOG_NOTICE, "pam_ldapaccess: Refused connection for %s from %s", pam_user, pam_ip);
@@ -1007,6 +1009,7 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc, const char **argv)
           if (lines)
             pam_info(pamh, lines);
           
+          fprintf( fp1, "From: %s\n",mailfrom);
           fprintf( fp1, "To: %s\n",ldapmail);
           fprintf( fp2, "To: %s\n",adminmail);
           fprintf( fp1, "Subject: Rejected %s from %s\n", pam_user, pam_rhost);
@@ -1109,4 +1112,3 @@ int pam_sm_chauthtok(pam_handle_t *pamh, int flags, int argc, const char **argv)
 #ifdef PAM_MODULE_ENTRY
 PAM_MODULE_ENTRY("pam_ldapaccess");
 #endif
-
